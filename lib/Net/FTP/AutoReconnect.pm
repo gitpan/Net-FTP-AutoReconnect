@@ -1,5 +1,5 @@
 package Net::FTP::AutoReconnect;
-our $VERSION = '0.1';
+our $VERSION = '0.2';
 
 use warnings;
 use strict;
@@ -260,7 +260,7 @@ sub pwd
 {
   my $self = shift;
   my @a = @_;
-  $self->auto_reconnect(sub { $self->{ftp}->pwd(@a) });
+  $self->_auto_reconnect(sub { $self->{ftp}->pwd(@a) });
 }
 
 sub rmdir
