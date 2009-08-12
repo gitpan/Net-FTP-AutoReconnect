@@ -1,5 +1,5 @@
 package Net::FTP::AutoReconnect;
-our $VERSION = '0.2';
+our $VERSION = '0.3';
 
 use warnings;
 use strict;
@@ -77,8 +77,20 @@ sub new {
   my $class = shift;
   bless $self,$class;
 
-  $self->{newargs} = \@_;
-  $self->reconnect();
+  # Adapted from the Net::FTP constructor, version 2.77
+  if (@_ % 2)
+  {
+    $self->{_peer} = shift;
+    $self->{_args} = { @_ };
+  }
+  else
+  {
+    $self->{_args} = { @_ };
+    $self->{_peer} = delete $self->{_args}{Host};
+  }
+  $self->{_connect_count} = 0;
+
+  $self->reconnect( 0 );
 
   $self;
 }
@@ -99,12 +111,17 @@ the state we can.
 sub reconnect
 {
   my $self = shift;
+  
+  my $is_reconnect = shift;
+  my $connection_type = ($is_reconnect) ? "Reconnecting" : "Connecting";
 
-  warn "Reconnecting!\n"
-    if ($ENV{DEBUG});
+  warn join(' ',ref($self),$connection_type." to FTP server $self->{_peer}\n")
+    if ($ENV{DEBUG} || $self->{_args}{Debug});
 
-  $self->{ftp} = Net::FTP->new(@{$self->{newargs}})
-    or die "Couldn't create new FTP object\n";
+  ++$self->{_connect_count};
+
+  $self->{ftp} = Net::FTP->new($self->{_peer}, %{$self->{_args}})
+    or die "Couldn't create new FTP object: $@\n";
 
   if ($self->{login})
   {
@@ -159,7 +176,7 @@ sub _auto_reconnect
   my $ret = $code->();
   if (!defined($ret))
   {
-    $self->reconnect();
+    $self->reconnect( 1 );
     $ret = $code->();
   }
   $ret;
@@ -180,6 +197,33 @@ sub _after_pcmd
   $r;
 }
 
+=head3 disconnect()
+
+Disconnect the current FTP connection abruptly.  Mostly useful for
+testing.
+
+=cut
+  ;
+
+sub disconnect
+{
+  my $self = shift;
+  return POSIX::close(fileno($self->{ftp}));
+}
+
+=head3 connect_count()
+
+Return the number of times we have connected or reconnected to this
+server.  Mostly useful for testing.
+
+=cut
+  ;
+
+sub connect_count
+{
+  my $self = shift;
+  return $self->{_connect_count};
+}
 
 sub login
 {
@@ -206,36 +250,36 @@ sub ascii
 {
   my $self = shift;
   $self->{mode} = 'ascii';
-  $self->_auto_reconnect(sub { $self->{ftp}->ascii() });
+  $self->_auto_reconnect(sub { $self->{ftp}->ascii() || undef });
 }
 
 sub binary
 {
   my $self = shift;
   $self->{mode} = 'binary';
-  $self->_auto_reconnect(sub { $self->{ftp}->binary() });
+  $self->_auto_reconnect(sub { $self->{ftp}->binary() || undef });
 }
 
 sub rename
 {
   my $self = shift;
   my @a = @_;
-  $self->_auto_reconnect(sub { $self->{ftp}->rename(@a) });
+  $self->_auto_reconnect(sub { $self->{ftp}->rename(@a) || undef });
 }
 
 sub delete
 {
   my $self = shift;
   my @a = @_;
-  $self->_auto_reconnect(sub { $self->{ftp}->delete(@a) });
+  $self->_auto_reconnect(sub { $self->{ftp}->delete(@a) || undef });
 }
 
 sub cwd
 {
   my $self = shift;
   my @a = @_;
-  my $ret = $self->_auto_reconnect(sub { $self->{ftp}->cwd(@a) });
-  if (defined($ret))
+  my $ret = $self->_auto_reconnect(sub { $self->{ftp}->cwd(@a) || undef });
+  if ($ret)
   {
     $self->{cwd} = $self->{ftp}->pwd()
       or die "Couldn't get directory after cwd\n";
@@ -247,8 +291,8 @@ sub cdup
 {
   my $self = shift;
   my @a = @_;
-  my $ret = $self->_auto_reconnect(sub { $self->{ftp}->cdup(@a) });
-  if (defined($ret))
+  my $ret = $self->_auto_reconnect(sub { $self->{ftp}->cdup(@a) || undef});
+  if ($ret)
   {
     $self->{cwd} = $self->{ftp}->pwd()
       or die "Couldn't get directory after cdup\n";
@@ -260,14 +304,14 @@ sub pwd
 {
   my $self = shift;
   my @a = @_;
-  $self->_auto_reconnect(sub { $self->{ftp}->pwd(@a) });
+  $self->_auto_reconnect(sub { $self->{ftp}->pwd(@a)});
 }
 
 sub rmdir
 {
   my $self = shift;
   my @a = @_;
-  $self->_auto_reconnect(sub { $self->{ftp}->rmdir(@a) });
+  $self->_auto_reconnect(sub { $self->{ftp}->rmdir(@a) || undef});
 }
 
 sub mkdir
@@ -305,7 +349,7 @@ sub retr
 {
   my $self = shift;
   my @a = @_;
-  $self->_after_pcmd($self->_auto_reconnect(sub { $self->{ftp}->retr(@a) }));
+  $self->_after_pcmd($self->_auto_reconnect(sub { $self->{ftp}->retr(@a) || undef }));
 }
 
 sub get
